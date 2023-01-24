@@ -96,7 +96,7 @@ fprintf('Estimated tot. comp. time:   %.0fm %.0fs\n',...
 n_nup = zeros(size(hive, 1), 1);        % # of non updated iteration
 
 % Optimal solutions
-hive(end-n_opt+1:end, :) = optSol(dim, hive, type, f_f, sum(f_g, 2), n_opt, tol);
+hive(end-n_opt+1:end, :) = optSol(dim, hive, type, f_f, sum(abs(f_g), 2), n_opt, tol);
 for i = size(hive, 1) - n_opt + 1:size(hive, 1)
     f_f(i, :) = f(hive(i, 1:dim)); f_g(i, :) = g(hive(i, 1:dim));
     f_L(i, :) = f_f(i, :) + sum(hive(i, dim+1:end).*f_g(i, :));
@@ -114,8 +114,11 @@ end
 tic
 for iter = 1:cycle
     % Resample onlooker bees
-    if type == -1, score = abs(max(f_L(1:n_emp)) - f_L(1:n_emp)) + sum(abs(f_g(1:n_emp, :)), 2);
-    else, score = abs(min(f_L(1:n_emp)) - f_L(1:n_emp)) + sum(abs(f_g(1:n_emp, :)), 2); end
+%     if dim_g ~= 0, score = sum(abs(f_g(1:n_emp, :)), 2);
+%     else
+        if type == -1, score = abs(max(f_L(1:n_emp)) - f_L(1:n_emp));
+        else, score = abs(min(f_L(1:n_emp)) - f_L(1:n_emp)); end
+%     end
 
     % Probability and its density function
     prob = (max(score) - score)/sum(max(score) - score);
@@ -166,7 +169,7 @@ for iter = 1:cycle
             df = zeros(min(dim, nEqLag), 1); dg = zeros(min(dim, nEqLag), dim_g);
             dx = diag(alpha*hive(i, 1:dim)); hive(i, j) = inf;
             while isinf(hive(i, j)) || isnan(hive(i, j))
-                indexLag = [j1, randi(dim, 1, min(dim, nEqLag) - 1)];
+                indexLag = randperm(dim, min(dim, nEqLag));
                 for n = 1:min(dim, nEqLag)
                     df(n, :) = f(hive(i, 1:dim) + dx(indexLag(n), :)) - ...
                         f(hive(i, 1:dim) - dx(indexLag(n), :));
@@ -183,7 +186,7 @@ for iter = 1:cycle
     end
     
     % Optimal solution
-    hive(end-n_opt+1:end, :) = optSol(dim, hive, type, f_f, sum(f_g, 2), n_opt, tol);
+    hive(end-n_opt+1:end, :) = optSol(dim, hive, type, f_f, sum(abs(f_g), 2), n_opt, tol);
     for i = size(hive, 1) - n_opt + 1:size(hive, 1)
         f_f(i, :) = f(hive(i, 1:dim)); f_g(i, :) = g(hive(i, 1:dim));
         f_L(i, :) = f_f(i, :) + sum(hive(i, dim+1:end).*f_g(i, :));
@@ -238,7 +241,8 @@ function opt = optSol(dim, hive, type, f_f, f_g, n_opt, tol)
         if index > n_opt
             break;
         end
-    end    
+    end
+    opt(index:end, :) = nan(n_opt - index + 1, size(hive, 2));
 end
 
 function drawHive(nFig, dim, hive, f, g, f_L, n_emp, n_onl, n_opt, minmax)
