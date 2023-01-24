@@ -1,6 +1,6 @@
 function [opt, hive, ABC_time] = ABC(dim, f, lb, ub, g, type, ...
                 n_emp, n_onl, cycle, gen, phi, maxIter, ...
-                n_opt, tol, hive_i)
+                nEqLag, n_opt, tol, hive_i)
 % ABC - Artificial Bee Colony algorithm
 %   Optimization algorithm that solves mir or max problems in the form
 %   arg__ f(x)  subject to:     g(x) = 0    (equality constraints)
@@ -16,12 +16,13 @@ function [opt, hive, ABC_time] = ABC(dim, f, lb, ub, g, type, ...
 %      cycle  - # of algorithm iterations  [100 (default)]
 %
 %   Colony settings:
-%      n_emp    - # of employed bees                        [100 (default)]
-%      n_onl    - # of onlooker bees                        [100 (default)]
-%      gen      - bees initialization function              [1000*rand - 500 (default) | @fun(), mex()]
-%      phi      - random function in [-1, 1]                [2*rand - 1 (default) | @fun(), mex()]
-%      maxIter  - max non-update sol iter before rejection  [10 (default)]
-%      hive_i   - hive initialization                       [double(n_i, dim + dim_g)]
+%      n_emp    - # of employed bees                            [100 (default)]
+%      n_onl    - # of onlooker bees                            [100 (default)]
+%      gen      - bees initialization function                  [1000*rand - 500 (default) | @fun(), mex()]
+%      phi      - random function in [-1, 1]                    [2*rand - 1 (default) | @fun(), mex()]
+%      maxIter  - max non-update sol iter before rejection      [10 (default)]
+%      nEqLag   - max # of equation to compute Lag multiplier   [dim (default)]
+%      hive_i   - hive initialization                           [double(n_i, dim + dim_g)]
 %     
 %   Solution settings
 %      n_opt  - number of returned optimal sol          [10 (default)]
@@ -33,7 +34,7 @@ function [opt, hive, ABC_time] = ABC(dim, f, lb, ub, g, type, ...
 %      ABC_time - sol. comp. time     [double]
 
 %% internal parameters
-showFig = [true, false, false];     % show figure ([init, loop, end])
+showFig = [false, false, true];     % show figure ([init, loop, end])
 nFig = 1;                           % figure # for plotting
 
 %% Default input parameters
@@ -50,8 +51,9 @@ if (nargin <  9) || isempty(n_onl),   n_onl = 100; end
 if (nargin < 10) || isempty(gen),     gen = @(n, dim) 1000*rand(n, dim) - 500; end
 if (nargin < 11) || isempty(phi),     phi = @() 2*rand - 1; end
 if (nargin < 12) || isempty(maxIter), maxIter = 20; end
-if (nargin < 13) || isempty(n_opt),   n_opt = 10; end
-if (nargin < 14) || isempty(tol),     tol = 1; end
+if (nargin < 13) || isempty(nEqLag),  nEqLag = dim; end
+if (nargin < 14) || isempty(n_opt),   n_opt = 10; end
+if (nargin < 15) || isempty(tol),     tol = 1; end
 
 % Additional parameters
 if ~isempty(g)
@@ -69,7 +71,7 @@ switch type
 end
 
 %% Hive initialization
-if (nargin < 15) || isempty(hive_i) || size(hive_i, 2) ~= dim + dim_g
+if (nargin < 16) || isempty(hive_i) || size(hive_i, 2) ~= dim + dim_g
     hive = gen(n_emp + n_onl + n_opt, dim + dim_g);
 else
     hive = [hive_i(1:min(size(hive_i, 1), n_emp + n_onl + n_opt), :);
@@ -81,7 +83,7 @@ f_f = zeros(size(hive, 1), 1); f_g = zeros(size(hive, 1), max(dim_g, 1));
 f_L = zeros(size(hive, 1), 1);
 time = [0, 0, 0];
 for i = 1:size(hive, 1)
-    tic, f_f(i, :) = f(hive(i, 1:dim)); time(1) = time(1) + toc ;
+    tic, f_f(i, :) = f(hive(i, 1:dim)); time(1) = time(1) + toc;
     tic, f_g(i, :) = g(hive(i, 1:dim)); time(2) = time(2) + toc;
     tic, f_L(i, :) = f_f(i, :) + sum(hive(i, dim+1:end).*f_g(i, :)); time(3) = time(3) + toc;
 end
@@ -89,7 +91,8 @@ fprintf('Cost fun. computation time:  %.2fms\n', 1000*time(1)/size(hive, 1))
 fprintf('Constraint computation time: %.2fms\n', 1000*time(2)/size(hive, 1))
 fprintf('Lagrangian computation time: %.2fms\n', 1000*time(3)/size(hive, 1))
 fprintf('Estimated tot. comp. time:   %.0fm %.0fs\n',...
-    floor(sum(time)*cycle/60), mod(sum(time)*cycle, 60))
+    floor((sum(time) + (time(1) + time(2))*min(nEqLag, dim))*cycle/60),...
+    mod((sum(time) + (time(1) + time(2))*min(nEqLag, dim))*cycle, 60))
 n_nup = zeros(size(hive, 1), 1);        % # of non updated iteration
 
 % Optimal solutions
@@ -160,14 +163,20 @@ for iter = 1:cycle
 
             % Update lagrangian multipliers
             alpha = min([0.01, abs(f_g(i, :))]);
-            df = zeros(dim, 1); dg = zeros(dim, dim_g); dx = diag(alpha*hive(i, 1:dim));
-            for n = 1:dim
-                df(n, :) = f(hive(i, 1:dim) + dx(n, :)) - f(hive(i, 1:dim) - dx(n, :));
-                dg(n, :) = g(hive(i, 1:dim) + dx(n, :)) - g(hive(i, 1:dim) - dx(n, :));
-            end
+            df = zeros(min(dim, nEqLag), 1); dg = zeros(min(dim, nEqLag), dim_g);
+            dx = diag(alpha*hive(i, 1:dim)); hive(i, j) = inf;
+            while isinf(hive(i, j)) || isnan(hive(i, j))
+                indexLag = [j1, randi(dim, 1, min(dim, nEqLag) - 1)];
+                for n = 1:min(dim, nEqLag)
+                    df(n, :) = f(hive(i, 1:dim) + dx(indexLag(n), :)) - ...
+                        f(hive(i, 1:dim) - dx(indexLag(n), :));
+                    dg(n, :) = g(hive(i, 1:dim) + dx(indexLag(n), :)) - ...
+                        g(hive(i, 1:dim) - dx(indexLag(n), :));
+                end
 
-            hive(i, j) = -dg(:, j-dim)'*df/(norm(dg(:, j-dim)).^2);
-            f_L(i, :) = f_f(i, :) + hive(i, dim+1:end)*f_g(i, :)';
+                hive(i, j) = -dg(:, j-dim)'*df/(norm(dg(:, j-dim)).^2);
+                f_L(i, :) = f_f(i, :) + hive(i, dim+1:end)*f_g(i, :)';
+            end
         end
 
         if check, n_nup(i) = n_nup(i) + 1; end
@@ -187,7 +196,7 @@ for iter = 1:cycle
     n_nup(n_nup >= maxIter, :) = zeros(sum(n_nup >= maxIter), 1);
 end
 
-opt = hive(end-n_opt+1:end, :);
+opt = hive(end-n_opt+1:end, 1:dim);
 ABC_time = toc;
 if showFig(3), drawHive(nFig, dim, hive, f, g, f_L, n_emp, n_onl, n_opt, [min(lb), max(ub)]); end
 
