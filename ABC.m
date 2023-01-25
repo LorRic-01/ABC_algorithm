@@ -62,7 +62,7 @@ end
 if ~isempty(g)
     dim_g = length(g(zeros(1, dim)));
     if size(g(zeros(1, dim)), 2) ~= dim_g
-        f = @(x) g(x)';
+        g = @(x) g(x)';
     end
 else
     g = @(x) 0; dim_g = 0;
@@ -87,7 +87,7 @@ for i = 1:size(hive, 1)
 end
 n_nup = zeros(size(hive, 1), 1);        % # of non updated iteration
 
-if option.showFig(1), drawHive(option.nFig, dim, hive, f, g, f_L, n_emp, n_onl, n_opt, [min(lb), max(ub)]); end
+if option.showFig(1), drawHive(option.nFig, dim, hive, f, f_f, n_emp, n_onl, n_opt, [min(lb), max(ub)]); end
 
 % Optimal solutions
 hive(end-n_opt+1:end, :) = optSol(dim, hive, f_f, sum(abs(f_g), 2), n_opt, tol);
@@ -147,7 +147,7 @@ for iter = 1:cycle
         new_sol(1, j) = new_sol(1, j) + phi()*(new_sol(1, j) - hive_i(k, j));
         f_new = f(new_sol(1, 1:dim)); g_new = g(new_sol(1, 1:dim));
         L_new = f_new + sum(new_sol(1, dim+1:end).*g_new);
-
+        
         if min(dim_g, 1)*rand <= 1 - min([1, max(abs(f_g(i, :)))])
             % Optimize w.r.t. Lagrangian
             [hive(i, 1:dim), check] = feasPos(new_sol(1, 1:dim), hive(i, 1:dim), ...
@@ -157,7 +157,7 @@ for iter = 1:cycle
             [hive(i, 1:dim), check] = feasPos(new_sol(1, 1:dim), hive(i, 1:dim), ...
                                 sum(abs(g_new), 2), sum(abs(f_g(i, :)), 2), lb, ub);
         end
-        
+
         % Update Lagrangian multipliers
         if dim_g
             alpha = min([0.001, abs(f_g(i, :))]);
@@ -172,11 +172,8 @@ for iter = 1:cycle
             hive(i, dim+1:end) = -(dg'*df)./(sum(dg.^2, 1))';
         end
 
-
-        if check, n_nup(i) = 0;
+        if check, n_nup(i) = 0; f_f(i, :) = f_new; f_g(i, :) = g_new;
         else, n_nup(i) = n_nup(i) + 1; end
-
-        f_f(i, :) = f(hive(i, 1:dim)); f_g(i, :) = g(hive(i, 1:dim));
         f_L(i, :) = f_f(i, :) + sum(hive(i, dim+1:end).*f_g(i, :));
     end
 
@@ -187,7 +184,7 @@ for iter = 1:cycle
         f_L(i, :) = f_f(i, :) + sum(hive(i, dim+1:end).*f_g(i, :));
     end
 
-    if option.showFig(2), drawHive(option.nFig, dim, hive, f, g, f_L, n_emp, n_onl, n_opt, [min(lb), max(ub)]); end
+    if option.showFig(2), drawHive(option.nFig, dim, hive, f, f_f, n_emp, n_onl, n_opt, [min(lb), max(ub)]); end
 
     % Resample non updted iterations
     hive(n_nup >= maxIter, :) = gen(sum(n_nup >= maxIter), dim + dim_g);
@@ -197,7 +194,7 @@ end
 
 opt = hive(end-n_opt+1:end, 1:dim);
 ABC_time = toc;
-if option.showFig(3), drawHive(option.nFig, dim, hive, f, g, f_L, n_emp, n_onl, n_opt, [min(lb), max(ub)]); end
+if option.showFig(3), drawHive(option.nFig, dim, hive, f, f_f, n_emp, n_onl, n_opt, [min(lb), max(ub)]); end
 
 end
 %% Functions
@@ -231,15 +228,14 @@ function opt = optSol(dim, hive, f_f, f_g, n_opt, tol)
 %     opt(index:end, :) = nan(n_opt -index + 1, size(hive, 2));
 end
 
-function drawHive(nFig, dim, hive, f, g, f_L, n_emp, n_onl, n_opt, minmax)
+function drawHive(nFig, dim, hive, f, f_f, n_emp, n_onl, n_opt, minmax)
     % Plot the 2D or 3D graph of the system
     % Input:
     %   nFig    - figure #                      [-]
     %   dim     - problem's dimension           [-]
     %   hive    - possible solutions            [double(n, dim + dim_g)]
     %   f       - (nectar) cost function        [@fun(), mex()]
-    %   g       - equality constraint           [none (default) | @fun(), mex()]
-    %   f_L     - hive Lagrangian cost          [double(n, 1)]
+    %   f_f     - hive cost                     [double(n, 1)]
     %   n_emp   - # of employed bees            [-]
     %   n_onl   - # of onlooker bees            [-]
     %   n_opt   - # of returned optimal sol     [-]
@@ -247,27 +243,25 @@ function drawHive(nFig, dim, hive, f, g, f_L, n_emp, n_onl, n_opt, minmax)
     
     warning off
     
-    L = @(x) f(x(1:dim)) + sum(x(dim+1:size(hive, 2)).*g(x(1:dim)), 2); % Lagrangian
-    
     figure(nFig), hold off
-    if size(hive, 2) < 2
-        fplot(@(x) L(x), minmax), hold on
-        scatter(hive(1:n_emp, 1), f_L(1:n_emp, :), 'r', 'filled')
-        scatter(hive(n_emp+1:n_emp+n_onl, 1), f_L(n_emp+1:n_emp+n_onl, :), 'b', 'filled')
-        scatter(hive((end - n_opt + 1):end, 1), f_L((end - n_opt + 1):end, :), 'g', 'filled')
-        xlabel('x'), ylabel('L(x)'), drawnow
+    if dim < 2
+        fplot(@(x) f(x), minmax), hold on
+        scatter(hive(1:n_emp, 1), f_f(1:n_emp, :), 'r', 'filled')
+        scatter(hive(n_emp+1:n_emp+n_onl, 1), f_f(n_emp+1:n_emp+n_onl, :), 'b', 'filled')
+        scatter(hive((end - n_opt + 1):end, 1), f_f((end - n_opt + 1):end, :), 'g', 'filled')
+        xlabel('x'), ylabel('f'), drawnow
     else
-        fsurf(@(x, y) L([x, y, hive(end-n_opt+1, 3:end)]), minmax), hold on
-        scatter3(hive(1:n_emp, 1), hive(1:n_emp, 2), f_L(1:n_emp, :), 'r', 'filled')
-        scatter3(hive(n_emp+1:n_emp+n_onl, 1), hive(n_emp+1:n_emp+n_onl, 2), f_L(n_emp+1:n_emp+n_onl, :), 'b', 'filled')
-        scatter3(hive((end - n_opt + 1):end, 1), hive((end - n_opt + 1):end, 2), f_L((end - n_opt + 1):end, :), 'g', 'filled')
-        xlabel('x1'), ylabel('x2'), zlabel('L'), drawnow
+        fsurf(@(x, y) f([x, y, hive(end-n_opt+1, 3:dim)]), minmax), hold on
+        scatter3(hive(1:n_emp, 1), hive(1:n_emp, 2), f_f(1:n_emp, :), 'r', 'filled')
+        scatter3(hive(n_emp+1:n_emp+n_onl, 1), hive(n_emp+1:n_emp+n_onl, 2), f_f(n_emp+1:n_emp+n_onl, :), 'b', 'filled')
+        scatter3(hive((end - n_opt + 1):end, 1), hive((end - n_opt + 1):end, 2), f_f((end - n_opt + 1):end, :), 'g', 'filled')
+        xlabel('x1'), ylabel('x2'), zlabel('f'), drawnow
     end
     
     warning on
 end
 
-function [p, f_p, chech] = feasPos(p1, p2, f_p1, f_p2, lb, ub)
+function [p, f_p, check] = feasPos(p1, p2, f_p1, f_p2, lb, ub)
     % Return the position s.t.
     %   - if p1, p2 unfeasible  -> p = the unfeasible p
     %       (euclidian distance from the bounds)
@@ -286,7 +280,7 @@ function [p, f_p, chech] = feasPos(p1, p2, f_p1, f_p2, lb, ub)
     %   p    - best position        [double(1, dim)]
     %   ch   - true if p == p2      [boolean]
     
-    p = [p1; p2]; f_p = [f_p1; f_p2]; chech = false;
+    p = [p1; p2]; f_p = [f_p1; f_p2]; check = false;
 
     % Compute the fesibility of the solution
     feas_lb = p >= lb; feas_ub = p <= ub;
@@ -300,13 +294,13 @@ function [p, f_p, chech] = feasPos(p1, p2, f_p1, f_p2, lb, ub)
     switch feas(1)*2 + feas(2)
         case 0
             % Both unfeasible
-            if d(1) > d(2), p = p2; f_p = f_p2; chech = true;
+            if d(1) > d(2), p = p2; f_p = f_p2; check = true;
             else, p = p1; f_p = f_p1; end
         case 3
             if f_p1 <= f_p2, p = p1; f_p = f_p1;
-            else, p = p2; f_p = f_p2; chech = true; end
+            else, p = p2; f_p = f_p2; check = true; end
         otherwise
             p = p(feas, :); f_p = f_p(feas, :);
-            chech = feas(2);
+            check = feas(2);
     end
 end

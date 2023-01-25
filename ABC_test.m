@@ -2,10 +2,10 @@ clc
 %% Initialization
 
 dim     = 2;
-f       = @(x) -418.9829*size(x, 2) - sum(x.*sin(sqrt(abs(x))));
-lb      = -500*ones(1, dim);
-ub      = 500*ones(1, dim);
-g       = []; % @(x) [x(1) - 1];
+f       = @(x) sum(x.^2); % @(x) -418.9829*size(x, 2) - sum(x.*sin(sqrt(abs(x))));
+lb      = -10*ones(1, dim);
+ub      = 10*ones(1, dim);
+g       = @(x) [x(1).^2 - 1, x(2).^2 - 1];
 cycle   = 1000;
 n_emp   = 100;
 n_onl   = 100;
@@ -14,8 +14,8 @@ phi     = @() 2*rand - 1;
 maxIter = inf;
 nEqLag  = 10;
 n_opt   = [];
-tol     = 100;
-option  = struct('nFig', 1, 'showFig', [false, false, true], 'v', true);
+tol     = inf;
+option  = struct('nFig', 1, 'showFig', [false, false, true], 'v', false);
 hive    = [];
 
 %% Run function
