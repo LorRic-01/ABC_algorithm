@@ -101,8 +101,8 @@ if option.v
     fprintf('Constraint computation time: %.2fms\n', 1000*time(2)/size(hive, 1))
     fprintf('Lagrangian computation time: %.2fms\n', 1000*time(3)/size(hive, 1))
     fprintf('Estimated tot. comp. time:   %.0fm %.0fs\n',...
-        floor((sum(time) + 2*(time(1) + time(2))*dim)*cycle/60),...
-        mod((sum(time) + 2*(time(1) + time(2))*dim)*cycle, 60))
+        floor((sum(time) + 2*(time(1) + time(2))*nEqLag)*cycle/60),...
+        mod((sum(time) + 2*(time(1) + time(2))*nEqLag)*cycle, 60))
     reply = input('Do you want to continue? Y/N [Y]: ', 's');
     switch reply
         case 'N', opt = hive(end-n_opt+1:end, 1:dim); ABC_time = 0; return
@@ -148,7 +148,7 @@ for iter = 1:cycle
         f_new = f(new_sol(1, 1:dim)); g_new = g(new_sol(1, 1:dim));
         L_new = f_new + sum(new_sol(1, dim+1:end).*g_new);
         
-        if min(dim_g, 1)*rand <= 1 - min([1, max(abs(f_g(i, :)))])
+        if min(dim_g, 1)*rand <= 1 - min(1, sum(f_g(i, :).^2))
             % Optimize w.r.t. Lagrangian
             [hive(i, 1:dim), check] = feasPos(new_sol(1, 1:dim), hive(i, 1:dim), ...
                                 L_new, f_L(i, :), lb, ub);
@@ -161,15 +161,22 @@ for iter = 1:cycle
         % Update Lagrangian multipliers
         if dim_g
             alpha = min([0.001, abs(f_g(i, :))]);
-            df = zeros(dim, 1); dg = zeros(dim, dim_g);
+            df = zeros(nEqLag, 1); dg = zeros(nEqLag, dim_g);
             dx = diag(alpha*hive(i, 1:dim));
+            index = 1;
             for n = 1:dim
-                df(n, :) = f(hive(i, 1:dim) + dx(n, :)) - ...
+                df_n = f(hive(i, 1:dim) + dx(n, :)) - ...
                         f(hive(i, 1:dim) - dx(n, :));
-                dg(n, :) = g(hive(i, 1:dim) + dx(n, :)) - ...
+                dg_n = g(hive(i, 1:dim) + dx(n, :)) - ...
                         g(hive(i, 1:dim) - dx(n, :));
+                if any(dg_n)
+                    df(index, :) = df_n; dg(index, :) = dg_n;
+                    index = index + 1;
+                end
+
+                if index > nEqLag, break; end
             end
-            hive(i, dim+1:end) = -(dg'*df)./(sum(dg.^2, 1))';
+            hive(i, dim+1:end) = -(dg(1:index-1, :)'*df(1:index-1, :))./(sum(dg(1:index-1, :).^2, 1))';
         end
 
         if check, n_nup(i) = 0; f_f(i, :) = f_new; f_g(i, :) = g_new;
