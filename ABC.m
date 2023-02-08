@@ -1,142 +1,144 @@
-function [opt, hive, ABC_time] = ABC(dim, f, lb, ub, g, ...
-                n_emp, n_onl, cycle, gen, phi, maxIter,...
-                n_opt, tol, opts, hive_i)
-% ABC - Artificial Bee Colony algorithm with Augmented Lagrangian Method for
-% Equality-Constrained Optimization
-%   Optimization algorithm that solves min problems in the form
-%   argmin f(x)  subject to:     g(x) = 0    (equality constraints)
-%       x                     lb <= x <= ub  (bounds)
+function [opt, ABC_time, hive] = ABC(dim, f, lb, ub, g, ...
+                       n_emp, n_onl, gen, phi, maxIter, ...
+                       n_opt, tol, opts, typeVal, hive_i)
+% ABC - Artificial Bee Colony algorithm with Augmented Lagrngian method for
+%       Equality Constrained optimization
+% Optimization algorithm that solves min problems in the form
+%   argmin f(x)     subject to:        g(x) = 0       (equality constraints)
+%     x                             lb <= x <= ub     (bounds)
 %
-%   Problem settings:
-%      dim      - problem's dimension         [-]
-%      f        - (nectar) cost function      [@fun(), mex()]
-%      g        - equality constraints        [empty (default) | @fun(), mex()]
-%      lb       - solution lower bound        [-inf (default) | double(1, dim)]
-%      ub       - solution upper bound        [ inf (default) | double(1, dim)]
-%      cycle    - # of algorithm iterations   [100 (default)]
+% Problem settings:
+%   dim  - problem's dimension     [-]
+%   f    - (nectar) cost function  [@fun(), mex]
+%   g    - equality constraints    [empty (default) | @fun(), mex]
+%   lb   - solution lower bound    [-inf (default) | double(1, dim)]
+%   ub   - solution upper bound    [inf (default) | double(1, dim)]
 %
-%   Colony settings:
-%      n_emp    - # of employed bees                            [100 (default)]
-%      n_onl    - # of onlooker bees                            [100 (default)]
-%      gen      - bees initialization function                  [200*rand - 100 (default) | @fun(), mex()]
-%      phi      - random function in [-1, 1]                    [2*rand - 1 (default) | @fun(), mex()]
-%      maxIter  - max non-update sol iter before rejection      [25 (default)]
-%      hive_i   - hive initialization                           [double(n_i, m)]
+% Colony settings:
+%   n_emp    - # of employed bees                           [100 (default)]
+%   n_onl    - # of onlooker bees                           [100 (default)]
+%   gen      - bees inizialization function                 [@(n) 200*rand(n , dim) - 100 (default) | @fun(), mex]
+%   phi      - random function between [-1, 1]              [@(n) 2*rand(n, 1) - 1 (default) | @fun(), mex]
+%   maxIter  - max non-updated sol. iter before rejection   [25 (default)]
+%   hive_i   - hive initialization                          [double(n_i, dim + dim_g)]
 %
-%   Results settings:
-%      n_opt    - number of optimal solutions   [10 (default)]
-%      tol      - min dist between opt sols     [1 (default)]
+% Result settings:
+%   n_opt  - number of optimal solutions          [10 (default)]
+%   tol    - min distance between opt solutions   [1 (default)]
 %
-%   Options
-%      opts     - printing options                                [struct]
-%                  'nFig'     - figure # for plotting             [1 (default)]
-%                  'showFig'  - show figure ([init, loop, end])   [[false, false, false] (default)]
-%                  'v'        - verbose                           [true (default) | on]
+% Options:
+%   opts     - ABC method options                               [struct]
+%                'nFig'     - # of figure for plotting          [1 (default)]
+%                'showFig'  - show figure ([init, loop, end])   [[false, false, false] (default)]
+%                'v'        - verbose                           [false (default)]
+%                'type'     - optimization cycle type           ['iter' (default) | 'step']
+%                'single'   - function defined for single input [false (default)]
 %
-%   Output:
-%      opt      - optimal solutions   [double(n_opt, dim)]
-%      hive     - general hive        [double(n_emp + n_onl + n_opt, dim + dim_g)]
-%      ABC_time - sol. comp. time     [double]
+%   typeVal  - optimization cycle type value                    [100 (default)]
+%
+% Output:
+%   opt       - optimal solutions       [double(n_opt, dim)]
+%   ABC_time  - sol. computation time   [double]
+%   hive      - hive                    [double(n_emp + b_emp, n_opt, dim + dim_g)]
 
 %% Default parameters
-if isempty(dim) || isempty(f)
+if nargin < 2 || isempty(dim) || isempty(f)
     error('Missing problem dimension and/or cost function')
 end
+if nargin <  3 || isempty(lb),      lb = -inf(1, dim);                  end
+if nargin <  4 || isempty(ub),      ub =  inf(1, dim);                  end
+if nargin <  5 || isempty(g),       g = [];                             end
+if nargin <  6 || isempty(n_emp),   n_emp = 100;                        end
+if nargin <  7 || isempty(n_onl),   n_onl = 100;                        end
+if nargin <  8 || isempty(gen),     gen = @(n) 200*rand(n , dim) - 100; end
+if nargin <  9 || isempty(phi),     phi = @(n) 2*rand(n, 1) - 1;        end
+if nargin < 10 || isempty(maxIter), maxIter = 25;                       end
+if nargin < 11 || isempty(n_opt),   n_opt = 10;                         end
+if nargin < 12 || isempty(tol),     tol = 1;                            end
+if nargin < 13 || isempty(opts)
+    opts = struct('nFig', 1, 'showFig', [false, false, false], ...
+        'v', false, 'type', 'iter', 'single', false);
+end
+if nargin < 14 || isempty(typeVal), typeVal = 100;                      end
 
-if isempty(lb), lb = -inf(1, dim); end
-if isempty(ub), ub = inf(1, dim); end
-if isempty(n_emp), n_emp = 100; end
-if isempty(n_onl), n_onl = 100; end
-if isempty(cycle), cycle = 100; end
-if isempty(gen), gen = @(n) 200*rand(n, dim) - 100; end
-if isempty(phi), phi = @(n) 2*rand(1, n) - 1; end
-if isempty(maxIter), maxIter = 25; end
-if isempty(n_opt), n_opt = 10; end
-if isempty(tol), tol = 1; end
-if isempty(opts)
-    opts = struct('nFig', 1, 'showFig', [false, false, false], 'v', true);
+switch opts.type
+    case 'step', opts.type = false;
+    otherwise, opts.type = true;
 end
 
-% Additional parameters
-if isempty(g), dim_g = 0;
+%% Additional checks and parameters
+% Equality cosntraints
+if nargin <  5 || isempty(g), g = []; dim_g = 0;
 else
     dim_g = length(g(zeros(1, dim)));
-    gen = @(n) [gen(n), 10*rand(n, dim_g) - 5];
-    L = @(x) f(x(1:dim)) + sum(x(dim+1:end).*g(x(1:dim)));
+    if size(g(zeros(1, dim)), 2) ~= dim_g, g = @(x) g(x)'; end
+    gen = @(n) [gen(n), 10*randn(n, dim_g) - 5];
+end
+
+% Function type check
+handle = isa(f, 'function_handle') && ...
+            (isempty(g) || isa(g, 'function_handle')) && ~opts.single;
+if ~handle
+    f = @(x) fun_eval(f, x);
+    if dim_g, g = @(x) fun_eval(g, x); end
+end
+
+% Lagrangian function creation
+if dim_g
+    L = @(x) f(x(:, 1:dim)) + sum(x(:, dim+1:end).*g(x(:, 1:dim)), 2);
+    f = @(x) sum(dfun_eval(L, x).^2, 2);
 end
 
 %% Hive initialization
-if ~isempty(hive_i) && size(hive_i, 2) == dim + dim_g
+if nargin < 15 || isempty(hive_i) || size(hive_i, 2) ~= dim + dim_g
+    hive = gen(n_emp + n_onl + n_opt);
+else
     n_bees = n_emp + n_onl + n_opt;
     hive = [hive_i(1:min(n_bees, size(hive_i, 1)), :); ...
         gen(max(n_bees - size(hive_i, 1), 0))];
-else
-    hive = gen(n_emp + n_onl + n_opt);
 end
 n_nup = zeros(size(hive, 1), 1);
 
-% Cost function eval
-f_f = zeros(size(hive, 1), 1); f_g = zeros(size(hive, 1), max(dim_g, 1));
-f_dL = zeros(size(hive, 1), 1);
-time = [0, 0, 0];
-for i = 1:size(hive, 1)
-    tic, f_f(i, :) = f(hive(i, 1:dim)); time(1) = time(1) + toc;
-    if dim_g
-        tic, f_g(i, :) = g(hive(i, 1:dim)); time(2) = time(2) + toc;
-        tic, f_dL(i, :) = sum(discDiff(L, hive(i, :), dim).^2) + sum(f_g(i, :).^2); time(3) = time(3) + toc;
-    end
-end
+% Cost function evaluation
+tic, cost = f(hive); time = toc;
 
 % Optimal solution
-if ~dim_g
-    [hive(end-n_opt+1:end, :), best_index] = optSol(f_f, hive, dim, n_opt, tol);
-    f_f(end-n_opt+1:end, :) = f_f(best_index, :);
-else
-    [hive(end-n_opt+1:end, :), best_index] = optSol(f_dL, hive, dim, n_opt, tol);
-    f_g(end-n_opt+1:end, :) = f_g(best_index, :);
-    f_dL(end-n_opt+1:end, :) = f_dL(best_index, :);
-end
-    
+[hive(end-n_opt+1:end, :), index] = optSol(cost, hive, dim, n_opt, tol);
+cost(end-n_opt+1:end, :) = cost(index, :);
+
 %% Plot and verbose
 if opts.showFig(1)
-    if ~dim_g, drawHiveFun(opts.nFig, dim, hive, f, f_f, n_emp, n_onl, ...
-                    n_opt, lb, ub);
-    else, drawHiveLag(opts.nFig, dim, hive, g, L, f_dL, n_emp, n_onl, n_opt, lb, ub)
-    end
+    drawHive(opts.nFig, dim, hive, f, cost, n_emp, n_onl, n_opt, lb, ub)
 end
 
 if opts.v
-    if dim_g
-        fprintf('Constraint computation time: %.2fms\n', 1000*time(2)/size(hive, 1))
-        fprintf('Lagrangian computation time: %.2fms\n', 1000*time(3)/size(hive, 1))
-        fprintf('Estimated tot. comp. time:   %.0fm %.0fs\n',...
-                    floor((time(1) + time(2))*cycle/60), mod((time(1) + time(2))*cycle, 60))
-    else
-        fprintf('Cost fun. computation time:  %.2fms\n', 1000*time(1)/size(hive, 1))
-        fprintf('Estimated tot. comp. time:   %.0fm %.0fs\n',...
-                    floor(time(1)*cycle/60), mod(time(1)*cycle, 60))
+    if opts.type
+        fprintf('Cost function computation time: %.2fms\n', 1000*time/size(hive, 1));
+        fprintf('Estimated tot computation time: %.0fm %.0fs\n', ...
+            floor(time*typeVal/60), mod(time*typeVal, 60));
     end
-    reply = input('Do you want to continue? Y/N [Y]: ', 's');
+
+    reply = input('Do you want to continue Y/N [Y]: ', 's');
     switch reply
-        case 'N', ABC_time = 0; opt = hive(end-n_opt+1:end, :); return
-        otherwise, clear reply time
+        case 'N', ABC_time = 0; opt = hive(end-n_opt+1:end, 1:dim); return
+        otherwise, clear reply
     end
 end
 
 %% Algorithm
 lenDisp = 0; tic
+if opts.type, cycle = typeVal; else, cycle = inf; end
 for iter = 1:cycle
-    if opts.v
+    if opts.v && opts.type
         fprintf([repmat('\b', 1, lenDisp)]);
         lenDisp = fprintf('Iter: %d of %d\n', iter, cycle);
     end
-
+    
     % Resample onlooker bees
-    if ~dim_g, fit = abs(f_f(1:n_emp, :) - f_f(end-n_opt+1, :));
-    else, fit = abs(f_dL(1:n_emp, :) - f_dL(end-n_opt+1, :)); end
+    fit = abs(cost(1:n_emp) - cost(end-n_opt+1));
     fit = max(fit) - fit;
 
-    % Probability and density function
+    % Probability and dednsity function
     if sum(fit) < 1e-5, prob = ones(n_emp, 1)/n_emp;
     else, prob = fit/sum(fit); end
     dens_prob = cumsum(prob);
@@ -144,96 +146,82 @@ for iter = 1:cycle
     for i = 1:n_onl
         index = find(dens_prob >= rand, 1);
         hive(n_emp + i, :) = hive(index, :);
-        if ~dim_g, f_f(n_emp + i, :) = f_f(index, :);
-        else, f_g(n_emp + i, :) = f_g(index, :); f_dL(n_emp + i, :) = f_dL(index, :); end
+        cost(n_emp + i) = cost(index);
     end
 
     % Move bees
+    tmp_hive = hive;
     for i = 1:n_emp + n_onl
-        % Choose bee to comapre
         k = i;
         while k == i
             k = randi(n_emp + n_onl, 1);
-            j = randperm(dim + dim_g, randi(dim + dim_g, 1));
+            j = randperm(dim + dim_g, randi(dim + dim_g , 1)); % randi(dim + dim_g, 1);
         end
-        
-        % Optimize solution
-        new_sol = hive(i, :);
-        new_sol(1, j) = new_sol(1, j) + phi(length(j)).*(new_sol(1, j) - hive(k, j));
-        
-        if ~dim_g
-            f_new = f(new_sol);
-            [hive(i, :), check] = feasPos(new_sol(1, 1:dim), hive(i, 1:dim), ...
-                f_new, f_f(i, :), lb, ub);
-            if check, f_f(i, :) = f_new; end
-        else
-            g_new = g(new_sol(1:dim));
-            dL_new = sum(discDiff(L, new_sol, dim).^2) + sum(g_new.^2);
-            [~, check] = feasPos(new_sol(1, 1:dim), hive(i, 1:dim), ...
-                dL_new, f_dL(i, :), lb, ub);
-            if check, hive(i, :) = new_sol; f_g(i, :) = g_new; f_dL(i, :) = dL_new; end
-        end
-
-        if check, n_nup(i) = 0; else, n_nup(i) = n_nup(i) + 1; end
+        tmp_hive(i, j) = tmp_hive(i, j) + phi(1).*(tmp_hive(i, j) - hive(k, j));
     end
-    
+    new_cost = f(tmp_hive);
+
+    % Best poition
+    for i = 1:n_emp + n_onl
+        check = bestPos(hive(i, 1:dim), tmp_hive(i, 1:dim), ...
+            cost(i), new_cost(i), lb, ub);
+        if ~check, hive(i, :) = tmp_hive(i, :); cost(i) = new_cost(i); n_nup(i) = 0;
+        else, n_nup(i) = n_nup(i) + 1; end
+    end
 
     % Optimal solution
-    if ~dim_g
-        [hive(end-n_opt+1:end, :), best_index] = optSol(f_f, hive, dim, n_opt, tol);
-        f_f(end-n_opt+1:end, :) = f_f(best_index, :);
-    else
-        [hive(end-n_opt+1:end, :), best_index] = optSol(f_dL, hive, dim, n_opt, tol);
-        f_g(end-n_opt+1:end, :) = f_g(best_index, :);
-        f_dL(end-n_opt+1:end, :) = f_dL(best_index, :);
-    end
+    [hive(end-n_opt+1:end, :), index] = optSol(cost, hive, dim, n_opt, tol);
+    cost(end-n_opt+1:end, :) = cost(index, :);
 
     % Plot hive
     if opts.showFig(2)
-        if ~dim_g, drawHiveFun(opts.nFig, dim, hive, f, f_f, n_emp, n_onl, ...
-                        n_opt, lb, ub);
-        else, drawHiveLag(opts.nFig, dim, hive, g, L, f_dL, n_emp, n_onl, n_opt, lb, ub)
-        end
+        drawHive(opts.nFig, dim, hive, f, cost, n_emp, n_onl, n_opt, lb, ub)
     end
 
-    % Reject non updated bees
-    for i = 1:n_emp
-        if n_nup(i) >= maxIter
-            hive(i, :) = gen(1); n_nup(i, :) = 0;
-            if ~dim_g, f_f(i, :) = f(hive(i, 1:dim));
-            else
-                f_g(i, :) = g(hive(i, 1:dim));
-                f_dL(i, :) = sum(discDiff(L, hive(i, :), dim).^2) + sum(f_g(i, :).^2);
-            end
-        end
-    end
+    % Reejct non updated bees
+    hive(n_nup >= maxIter, :) = gen(sum(n_nup >= maxIter));
+    cost(n_nup >= maxIter) = f(hive(n_nup >= maxIter, :));
+    n_nup(n_nup >= maxIter) = zeros(sum(n_nup >= maxIter), 1);
 end
 
 %% Results
 ABC_time = toc;
-opt = hive(end-n_opt+1:end, :);
+opt = hive(end-n_opt+1:end, 1:dim);
+
+% Plot hive
 if opts.showFig(3)
-    if ~dim_g, drawHiveFun(opts.nFig, dim, hive, f, f_f, n_emp, n_onl, ...
-                    n_opt, lb, ub);
-    else, drawHiveLag(opts.nFig, dim, hive, g, L, f_dL, n_emp, n_onl, n_opt, lb, ub)
-    end
-end
+    drawHive(opts.nFig, dim, hive, f, cost, n_emp, n_onl, n_opt, lb, ub)
 end
 
-%% Functions
-function dfun = discDiff(fun, x, dim)
-    % Return the discretized differentiation of the function
+end
+
+%% Function
+function f_data = fun_eval(f, data)
+    % Evalute the function in the data
     % Input:
-    %   fun     - function [@fun(), mex()]
-    %   x       - point where to evalute the derivate   [doubel(1, n)]
-    % Output:
-    %   dfun    - disc diff of the funtion              [double(n, length(fun))] 
-    
-    alpha = 1e-5; % differentaition step
-    alpha_x = alpha*eye(dim, length(x));
-    dfun = zeros(dim, length(fun(x)));
-    for i = 1:dim
-        dfun(i, :) = (fun(x + alpha_x(i, :)) - fun(x - alpha_x(i, :))) / alpha;
+    %   f       - function to evaluate [@fun(), mex (return double(:, k))]
+    %   data    - data to use [double(n, m)]
+    % Output
+    %   f_data  - f(data) [double(n, k)]
+
+    f_data = zeros(size(data, 1), length(f(data(1,:))));
+    for i = 1:size(data, 1)
+        f_data(i, :) = f(data(i, :));
+    end
+end
+
+function df_data = dfun_eval(f, data)
+    % Compute the numeric derivate of the function in the data
+    % Input:
+    %   f       - function to evaluate [@fun(), mex (return double(:, 1))]
+    %   data    - data to use [double(n, m)]
+    % Output
+    %   df_data  - df(data) [double(n, m)]
+
+    df_data = zeros(size(data)); alpha = 1e-5; % differentiation step
+    alpha_x = alpha*eye(size(data, 2));
+    for i = 1:size(data, 1)
+        df_data(i, :) = (f(data(i, :) + alpha_x) - f(data(i, :) - alpha_x))/alpha;
     end
 end
 
@@ -265,135 +253,83 @@ function [opt, best_index] = optSol(cost, hive, dim, n_opt, tol)
     end
 end
 
-function [p, check] = feasPos(p1, p2, f1, f2, lb, ub)
-     % Return the position s.t.
-    %   - if p1, p2 unfeasible  -> p = the unfeasible p
-    %       (euclidian distance from the bounds)
-    %   - if one is unfeasible  -> p = feasible one
-    %   - if both feasible      -> p = p with min f_p
+function drawHive(nFig, dim, hive, f, cost, n_emp, n_onl, n_opt, lb, ub)
+    % Plot the 2D or 3D graph of the system
+    % Input:
+    %   nFig    - figure #                      [-]
+    %   dim     - problem's dimension           [-]
+    %   hive    - possible solutions            [double(n, m)]
+    %   f       - cost function                 [@fun(), mex()]
+    %   cost    - hive cost                     [double(n, 1)]
+    %   n_emp   - # of employed bees            [-]
+    %   n_onl   - # of onlooker bees            [-]
+    %   n_opt   - # of optimal bees             [-]
+    %   lb      - system lower bounds           [double(1, dim)]
+    %   ub      - system upper bounds           [double(1, dim)]
+    
+    figure(nFig), hold off
+    
+    n = [n_emp, n_onl, n_opt]; n = cumsum(n);
+    lb = max(lb, -100); ub = min(ub, 100);
+
+    if size(hive, 2) < 2
+        % Scalar case
+        x = lb:(ub - lb)/100:ub; cost_plot = f(x');
+        scatter(hive(1:n(1), 1), cost(1:n(1)), 'b', 'filled'), hold on
+        scatter(hive(n(1)+1:n(2), 1), cost(n(1)+1:n(2)), 'r', 'filled')
+        scatter(hive(n(2)+1:n(3), 1), cost(n(2)+1:n(3)), 'g', 'filled')
+        plot(x, cost_plot, 'LineWidth', 1)
+        xlabel('sol'), ylabel('Cost'), legend('emp', 'onl', 'opt'), grid on
+        axis tight; drawnow
+    else
+        % 3D case
+        if dim < 2
+            lb = [lb, min(hive(:, dim+1:end), [], 'all')];
+            ub = [ub, max(hive(:, dim+1:end), [], 'all')];
+        end
+        [x, y] = meshgrid(lb(1):(ub(1) - lb(1))/100:ub(1), lb(2):(ub(2) - lb(2))/100:ub(2));
+        x = reshape(x, [], 1); y = reshape(y, [], 1);
+        cost_plot = f([x, y, ones(size(x, 1), 1)*hive(n(2)+1, 3:end)]);
+        x = reshape(x, 101, 101); y = reshape(y, 101, 101); cost_plot = reshape(cost_plot, 101, 101);
+        scatter3(hive(1:n(1), 1), hive(1:n(1), 2), cost(1:n(1)), 'b', 'filled'), hold on
+        scatter3(hive(n(1)+1:n(2), 1), hive(n(1)+1:n(2), 2), cost(n(1)+1:n(2)), 'r', 'filled')
+        scatter3(hive(n(2)+1:n(3), 1), hive(n(2)+1:n(3), 2), cost(n(2)+1:n(3)), 'g', 'filled')
+        surf(x, y, cost_plot)
+        xlabel('sol1'), ylabel('sol2'), zlabel('Cost'), legend('emp', 'onl', 'opt'), grid on
+        axis tight; drawnow
+    end
+end
+
+function check = bestPos(p1, p2, f1, f2, lb, ub)
+    % Return true if
+    %   - p1, p2 unfeasible BUT p1 less unfeasible than p2
+    %   - p1 feasible, p2 unfeasible
+    %   - both feasible BUT f1 < f2
     %
     % Input:
-    %   p1      - position 1           [double(1, dim)]
-    %   p2      - position 2           [double(1, dim)]
-    %   f1      - cost p1              [-]
-    %   f2      - cost p2              [-]
-    %   lb      - lower bound          [double(1, dim)]
-    %   ub      - upper bound          [double(1, dim)]
+    %   p1  - position 1    [double(1, dim)]
+    %   p2  - position 2    [double(1, dim)]
+    %   f1  - cost p1       [-]
+    %   f2  - cost p2       [-]
+    %   lb  - lower bound   [double(1, dim)]
+    %   ub  - upper bound   [double(1, dim)]
     %
     % Output:
-    %   p       - best position        [double(1, dim)]
-    %   check   - true if p == p1      [boolean]
+    %   check               [boolean]
 
-    p = [p1; p2]; check = false;
+    p = [p1; p2];
 
-    % Compute feasibility of the solution
-    feas_lb = p >= lb; feas_ub = p <= ub;
-    feas = all(feas_lb & feas_ub, 2);
+    % Feasibility
+    feas = all((p >= lb) & (p <= ub), 2);
 
-    % Compute distance from bounds
-    pos_ub = p - ub; pos_lb = p - lb;
-    pos_ub(feas_ub) = 0; pos_lb(feas_lb) = 0;
+    % Distance from bounds
+    pos_ub = p - ub; pos_lb = lb - p;
+    pos_ub(pos_ub > 0) = 0; pos_lb(pos_lb > 0) = 0;
     d = sum(pos_ub.^2, 2) + sum(pos_lb.^2, 2);
 
     switch feas(1)*2 + feas(2)
-        case 0 % Both unfeasible
-            if d(1) < d(2), p = p1; check = true;
-            else, p = p2; end
-        case 3
-            if f1 <= f2, p = p1; check = true;
-            else, p = p2; end
-        otherwise
-            p = p(feas, :); check = feas(1);
+        case 0, check = d(1) < d(2); % both unfeasible
+        case 3, check = f1 < f2;
+        otherwise, check = feas(1);
     end
-end
-
-function drawHiveFun(nFig, dim, hive, f, f_f, n_emp, n_onl, n_opt, lb, ub)
-    % Plot the 2D or 3D graph of the system
-    % Input:
-    %   nFig    - figure #                      [-]
-    %   dim     - problem's dimension           [-]
-    %   hive    - possible solutions            [double(n, m)]
-    %   f       - (nectar) cost function        [@fun(), mex()]
-    %   f_f     - hive cost                     [double(n, 1)]
-    %   n_emp   - # of employed bees            [-]
-    %   n_onl   - # of onlooker bees            [-]
-    %   n_opt   - # of optimal bees             [-]
-    %   lb      - system lower bounds           [double(1, dim)]
-    %   ub      - system upper bounds           [double(1, dim)]
-    
-    figure(nFig), hold off
-    
-    if dim < 2
-        % Scalar case
-        x = lb:(ub-lb)/100:ub; f_fplot = zeros(length(x), 1);
-        for i = 1:length(x), f_fplot(i, :) = f(x(i)); end
-
-        plot(x, f_fplot, 'LineWidth', 1), hold on
-        scatter(hive(1:n_emp, 1), f_f(1:n_emp, :), 'b', 'filled')
-        scatter(hive(n_emp+1:n_emp+n_onl, 1), f_f(n_emp+1:n_emp+n_onl, :), 'r', 'filled')
-        scatter(hive(end-n_opt+1:end, 1), f_f(end-n_opt+1:end, :), 'g', 'filled')
-        xlabel('sol'), ylabel('cost fun'), grid on; drawnow
-    end
-
-    if dim >= 2
-        % Multiple dimension
-        [x, y] = meshgrid(lb(1):(ub(1)-lb(1))/100:ub(1), lb(2):(ub(2)-lb(2))/100:ub(2));
-        f_fplot = zeros(size(x));
-        for i = 1:length(x)
-            for j = 1:length(x)
-                f_fplot(i, j) = f([x(i, j), y(i, j), hive(end-n_opt+1, 3:dim)]);
-            end
-        end
-
-        surf(x, y, f_fplot), hold on
-        scatter3(hive(1:n_emp, 1), hive(1:n_emp, 2), f_f(1:n_emp, :), 'b', 'filled')
-        scatter3(hive(n_emp+1:n_emp+n_onl, 1), hive(n_emp+1:n_emp+n_onl, 2),...
-            f_f(n_emp+1:n_emp+n_onl, :), 'r', 'filled')
-        scatter3(hive(end-n_opt+1:end, 1), hive(end-n_opt+1:end, 2),...
-            f_f(end-n_opt+1:end, :), 'g', 'filled')
-        xlabel('x sol'), ylabel('y sol'), zlabel('cost fun')
-        grid on; drawnow
-    end
-end
-
-function drawHiveLag(nFig, dim, hive, g, L, f_dL, n_emp, n_onl, n_opt, lb, ub)
-    % Plot the 2D or 3D graph of the system
-    % Input:
-    %   nFig    - figure #                      [-]
-    %   dim     - problem's dimension           [-]
-    %   hive    - possible solutions            [double(n, m)]
-    %   g       - equality constraint           [@fun(), mex()]
-    %   L       - Lagrangian equation           [@fun(), mex()]
-    %   f_dL    - Lag diff. cost                [double(n, 1)]
-    %   n_emp   - # of employed bees            [-]
-    %   n_onl   - # of onlooker bees            [-]
-    %   n_opt   - # of optimal bees             [-]
-    %   lb      - system lower bounds           [double(1, dim)]
-    %   ub      - system upper bounds           [double(1, dim)]
-    
-    figure(nFig), hold off
-    
-    if dim == 1
-        lb = [lb, min(hive(:, dim+1:end), [], 'all')];
-        ub = [ub, max(hive(:, dim+1:end), [], 'all')];
-    end
-
-    % Multiple dimension
-    [x, y] = meshgrid(lb(1):(ub(1)-lb(1))/100:ub(1), lb(2):(ub(2)-lb(2))/100:ub(2));
-    f_dLplot = zeros(size(x));
-    for i = 1:length(x)
-        for j = 1:length(x)
-            point = [x(i, j), y(i, j), hive(end-n_opt+1, 3:end)];
-            f_dLplot(i, j) = sum(discDiff(L, point, dim).^2) + sum(g(point(1:dim)).^2);
-        end
-    end
-
-    surf(x, y, log(f_dLplot)), hold on
-    scatter3(hive(1:n_emp, 1), hive(1:n_emp, 2), log(f_dL(1:n_emp, :)), 'b', 'filled')
-    scatter3(hive(n_emp+1:n_emp+n_onl, 1), hive(n_emp+1:n_emp+n_onl, 2),...
-        log(f_dL(n_emp+1:n_emp+n_onl, :)), 'r', 'filled')
-    scatter3(hive(end-n_opt+1:end, 1), hive(end-n_opt+1:end, 2),...
-        log(f_dL(end-n_opt+1:end, :)), 'g', 'filled')
-    xlabel('x sol'), ylabel('y sol'), zlabel('cost fun')
-    grid on; drawnow
 end
