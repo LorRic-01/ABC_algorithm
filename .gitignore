@@ -1,5 +1,5 @@
 # Source code or compiled files #
-**/*.cc
+**/*.c
 **/*.mexw64
 
 # Matlab data #

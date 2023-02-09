@@ -1,8 +1,8 @@
-function [opt, ABC_time, hive] = ABC(dim, f, lb, ub, g, ...
+function [opt, ABC_time, hive] = ABC_improv(dim, f, lb, ub, g, ...
                        n_emp, n_onl, gen, phi, maxIter, ...
-                       n_opt, tol, opts, typeVal, hive_i)
-% ABC - Artificial Bee Colony algorithm with Augmented Lagrngian method for
-%       Equality Constrained optimization
+                       opts, typeVal, hive_i)
+% ABC_improv - Artificial Bee Colony improved algorithm with Augmented 
+%              Lagrangian method for Equality Constrained optimization
 % Optimization algorithm that solves min problems in the form
 %   argmin f(x)     subject to:        g(x) = 0       (equality constraints)
 %     x                             lb <= x <= ub     (bounds)
@@ -22,10 +22,6 @@ function [opt, ABC_time, hive] = ABC(dim, f, lb, ub, g, ...
 %   maxIter  - max non-updated sol. iter before rejection   [25 (default)]
 %   hive_i   - hive initialization                          [double(n_i, dim + dim_g)]
 %
-% Result settings:
-%   n_opt  - number of optimal solutions          [10 (default)]
-%   tol    - min distance between opt solutions   [1 (default)]
-%
 % Options:
 %   opts     - ABC method options                               [struct]
 %                'nFig'     - # of figure for plotting          [1 (default)]
@@ -37,9 +33,9 @@ function [opt, ABC_time, hive] = ABC(dim, f, lb, ub, g, ...
 %   typeVal  - optimization cycle type value                    [100 (default)]
 %
 % Output:
-%   opt       - optimal solutions       [double(n_opt, dim)]
+%   opt       - optimal solution        [double(1, dim)]
 %   ABC_time  - sol. computation time   [double]
-%   hive      - hive                    [double(n_emp + b_emp, n_opt, dim + dim_g)]
+%   hive      - hive                    [double(n_emp + n_onl + 1, dim + dim_g)]
 
 %% Default parameters
 if nargin < 2 || isempty(dim) || isempty(f)
@@ -53,13 +49,11 @@ if nargin <  7 || isempty(n_onl),   n_onl = 100;                        end
 if nargin <  8 || isempty(gen),     gen = @(n) 200*rand(n , dim) - 100; end
 if nargin <  9 || isempty(phi),     phi = @(n) 2*rand(n, 1) - 1;        end
 if nargin < 10 || isempty(maxIter), maxIter = 25;                       end
-if nargin < 11 || isempty(n_opt),   n_opt = 10;                         end
-if nargin < 12 || isempty(tol),     tol = 1;                            end
-if nargin < 13 || isempty(opts)
+if nargin < 11 || isempty(opts)
     opts = struct('nFig', 1, 'showFig', [false, false, false], ...
         'v', false, 'type', 'iter', 'single', false);
 end
-if nargin < 14 || isempty(typeVal), typeVal = 100;                      end
+if nargin < 12 || isempty(typeVal), typeVal = 100;                      end
 
 switch opts.type
     case 'step', opts.type = false;
@@ -90,10 +84,10 @@ if dim_g
 end
 
 %% Hive initialization
-if nargin < 15 || isempty(hive_i) || size(hive_i, 2) ~= dim + dim_g
-    hive = gen(n_emp + n_onl + n_opt);
+if nargin < 13 || isempty(hive_i) || size(hive_i, 2) ~= dim + dim_g
+    hive = gen(n_emp + n_onl + 1);
 else
-    n_bees = n_emp + n_onl + n_opt;
+    n_bees = n_emp + n_onl + 1;
     hive = [hive_i(1:min(n_bees, size(hive_i, 1)), :); ...
         gen(max(n_bees - size(hive_i, 1), 0))];
 end
@@ -103,12 +97,12 @@ n_nup = zeros(size(hive, 1), 1);
 tic, cost = f(hive); time = toc;
 
 % Optimal solution
-[hive(end-n_opt+1:end, :), index] = optSol(cost, hive, dim, n_opt, tol);
-cost(end-n_opt+1:end, :) = cost(index, :);
+[cost(end, :), index] = min(cost);
+hive(end, :) = hive(index, :);
 
 %% Plot and verbose
 if opts.showFig(1)
-    drawHive(opts.nFig, dim, hive, f, cost, n_emp, n_onl, n_opt, lb, ub)
+    drawHive(opts.nFig, dim, hive, f, cost, n_emp, n_onl, 1, lb, ub)
 end
 
 if opts.v
@@ -120,7 +114,7 @@ if opts.v
 
     reply = input('Do you want to continue Y/N [Y]: ', 's');
     switch reply
-        case 'N', ABC_time = 0; opt = hive(end-n_opt+1:end, 1:dim); return
+        case 'N', ABC_time = 0; opt = hive(end, 1:dim); return
         otherwise, clear reply
     end
 end
@@ -135,7 +129,7 @@ for iter = 1:cycle
     end
     
     % Resample onlooker bees
-    fit = abs(cost(1:n_emp) - cost(end-n_opt+1));
+    fit = abs(cost(1:n_emp) - cost(end));
     fit = max(fit) - fit;
 
     % Probability and dednsity function
@@ -155,9 +149,9 @@ for iter = 1:cycle
         k = i;
         while k == i
             k = randi(n_emp + n_onl, 1);
-            j = randperm(dim + dim_g, randi(dim + dim_g , 1)); % randi(dim + dim_g, 1);
+            j = randperm(dim + dim_g, randi(dim + dim_g, 1));
         end
-        tmp_hive(i, j) = tmp_hive(i, j) + phi(1).*(tmp_hive(i, j) - hive(k, j));
+        tmp_hive(i, j) = hive(end, j) + phi(1).*(tmp_hive(i, j) - hive(k, j));
     end
     new_cost = f(tmp_hive);
 
@@ -170,12 +164,12 @@ for iter = 1:cycle
     end
 
     % Optimal solution
-    [hive(end-n_opt+1:end, :), index] = optSol(cost, hive, dim, n_opt, tol);
-    cost(end-n_opt+1:end, :) = cost(index, :);
+    [cost(end, :), index] = min(cost);
+    hive(end, :) = hive(index, :);
 
     % Plot hive
     if opts.showFig(2)
-        drawHive(opts.nFig, dim, hive, f, cost, n_emp, n_onl, n_opt, lb, ub)
+        drawHive(opts.nFig, dim, hive, f, cost, n_emp, n_onl, 1, lb, ub)
     end
 
     % Reejct non updated bees
@@ -186,11 +180,11 @@ end
 
 %% Results
 ABC_time = toc;
-opt = hive(end-n_opt+1:end, 1:dim);
+opt = hive(end, 1:dim);
 
 % Plot hive
 if opts.showFig(3)
-    drawHive(opts.nFig, dim, hive, f, cost, n_emp, n_onl, n_opt, lb, ub)
+    drawHive(opts.nFig, dim, hive, f, cost, n_emp, n_onl, 1, lb, ub)
 end
 
 end
@@ -222,34 +216,6 @@ function df_data = dfun_eval(f, data)
     alpha_x = alpha*eye(size(data, 2));
     for i = 1:size(data, 1)
         df_data(i, :) = (f(data(i, :) + alpha_x) - f(data(i, :) - alpha_x))/alpha;
-    end
-end
-
-function [opt, best_index] = optSol(cost, hive, dim, n_opt, tol)
-    % Return n_opt indeces of the bees  with minimum cost, distant each
-    % other more than tol (w.r.t. the first dim dimensions)
-    % Input:
-    %   cost    - cost of each bee              [double(n, 1)]
-    %   hive    - bees positions                [double(n, m) m >= dim]
-    %   dim     - problem's dimension           [-]
-    %   n_opt   - number of optimal solutions   [-]
-    %   tol     - min dist between opt sols     [-]
-    % Output:
-    %   opt         - cost of the optimal solutions     [double(n_opt, 1)]
-    %   best_index  - index of the best solutions       [double(n_opt, 1)]
-
-    [~, index] = sort(cost);
-    best_index = index(1:n_opt); opt = hive(index(1:n_opt), :);
-    if n_opt == 1, return, end
-    iter = 2;
-    for i = 2:size(hive, 1)
-        if all(sqrt(sum((opt(1:iter-1, 1:dim) - hive(index(i), 1:dim)).^2, 2)) > tol)
-            best_index(iter) = index(i);
-            opt(iter, :) = hive(index(i), :);
-            iter = iter + 1;
-        end
-
-        if iter > n_opt, return, end
     end
 end
 
